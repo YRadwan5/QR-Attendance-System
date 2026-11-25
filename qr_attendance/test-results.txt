@@ -1,0 +1,6 @@
+test_full_workflow (test_app.Flow.test_full_workflow) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 1.711s
+
+OK
