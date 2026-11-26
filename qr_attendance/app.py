@@ -192,7 +192,52 @@ async def action(r:Request):
                     raw=await upload.read(5_000_001); await upload.close(); require(0<len(raw)<=5_000_000,'Image must be under 5 MB.'); img=cv2.imdecode(np.frombuffer(raw,np.uint8),cv2.IMREAD_GRAYSCALE); require(img is not None,'Unreadable image.'); token=cv2.QRCodeDetector().detectAndDecode(img)[0]; require(token,'No readable QR code. Try again.')
                 checkin(c,u,token); msg='Attendance recorded successfully.'
             elif a=='correction':
-                require(role=='student','Access denied.'); sid=number(f,'session'); s=c.execute('SELECT s.* FROM sessions s JOIN enrollments e ON e.course=s.course WHERE s.id=? AND e.student=?',(sid,uid)).fetchone(); require(s,'Session not found or access denied.'); require(not s['active'] or s['expires']<=int(time.time()),'Wait until the session ends.'); c.execute('INSERT INTO corrections(session,student,reason,created) VALUES(?,?,?,?)',(sid,uid,field(f,'reason',1000),int(time.time())))
+                require(role == 'student', 'Access denied.')
+
+                sid = number(f, 'session')
+
+                s = c.execute('''
+                        SELECT s.*
+                        FROM sessions s
+                        JOIN enrollments e ON e.course = s.course
+                        WHERE s.id = ? AND e.student = ?
+                    ''', (sid, uid)).fetchone()
+
+                require(s, 'Session not found or access denied.')
+
+                require(
+                    not s['active'] or s['expires'] <= int(time.time()),
+                    'Wait until the session ends.'
+                )
+
+                existing_attendance = c.execute(
+                    'SELECT 1 FROM attendance WHERE session=? AND student=?',
+                    (sid, uid)
+                ).fetchone()
+
+                require(
+                    not existing_attendance,
+                    'You are already marked as present.'
+                )
+
+                existing_request = c.execute(
+                    'SELECT 1 FROM corrections WHERE session=? AND student=?',
+                    (sid, uid)
+                ).fetchone()
+
+                require(
+                    not existing_request,
+                    'A correction request already exists.'
+                )
+
+                c.execute(
+                    '''INSERT INTO corrections
+                    (session, student, reason, created)
+                    VALUES (?, ?, ?, ?)''',
+                    (sid, uid, field(f, 'reason', 1000), int(time.time()))
+                )
+
+                msg = 'Correction request submitted successfully.'
             elif a=='decide':
                 require(role=='instructor','Access denied.'); cid=number(f,'correction'); cr=c.execute('SELECT cr.*,s.course FROM corrections cr JOIN sessions s ON s.id=cr.session WHERE cr.id=?',(cid,)).fetchone(); require(cr,'Request not found.'); own(c,u,cr['course']); decision=f.get('decision'); require(decision in ('approved','rejected'),'Invalid decision.'); require(cr['status']=='pending','Already decided.'); note=field(f,'note',1000); now=int(time.time()); cur=c.execute("UPDATE corrections SET status=?,decided=?,reviewer=?,decision_note=? WHERE id=? AND status='pending'",(decision,now,uid,note,cid)); require(cur.rowcount==1,'Already decided.');
                 if decision=='approved': c.execute('INSERT OR IGNORE INTO attendance VALUES(?,?,?)',(cr['session'],cr['student'],now))
