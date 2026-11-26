@@ -105,6 +105,77 @@ async def action(r:Request):
             if a=='logout':
                 c.execute('DELETE FROM logins WHERE token=?',(digest(r.cookies.get('sid','')),)); res=RedirectResponse('/',303); res.delete_cookie('sid'); return res
             if a=='profile': c.execute('UPDATE users SET name=? WHERE id=?',(field(f,'name',100),uid))
+            elif a == 'delete_user':
+                require(role == 'admin', 'Access denied.')
+
+                target_id = number(f, 'user_id')
+
+                c.execute('BEGIN IMMEDIATE')
+
+                target = c.execute(
+                    'SELECT id, role FROM users WHERE id=?',
+                    (target_id,)
+                ).fetchone()
+
+                require(target, 'User not found.')
+                require(target_id != uid, 'Cannot delete your own account.')
+                require(target['role'] != 'admin', 'Cannot delete administrators.')
+
+                if target['role'] == 'instructor':
+                    course_count = c.execute(
+                        'SELECT COUNT(*) FROM courses WHERE instructor=?',
+                        (target_id,)
+                    ).fetchone()[0]
+
+                    if course_count:
+                        replacement_id = number(f, 'replacement_id')
+
+                        replacement = c.execute(
+                            "SELECT id FROM users WHERE id=? AND role='instructor'",
+                            (replacement_id,)
+                        ).fetchone()
+
+                        require(
+                            replacement and replacement_id != target_id,
+                            'Select another instructor before deleting.'
+                        )
+
+                        c.execute(
+                            'UPDATE courses SET instructor=? WHERE instructor=?',
+                            (replacement_id, target_id)
+                        )
+
+                c.execute(
+                    'DELETE FROM corrections WHERE student=?',
+                    (target_id,)
+                )
+
+                c.execute(
+                    'UPDATE corrections SET reviewer=NULL WHERE reviewer=?',
+                    (target_id,)
+                )
+
+                c.execute(
+                    'DELETE FROM attendance WHERE student=?',
+                    (target_id,)
+                )
+
+                c.execute(
+                    'DELETE FROM enrollments WHERE student=?',
+                    (target_id,)
+                )
+
+                c.execute(
+                    'DELETE FROM logins WHERE user_id=?',
+                    (target_id,)
+                )
+
+                c.execute(
+                    'DELETE FROM users WHERE id=?',
+                    (target_id,)
+                )
+
+                msg = 'User and associated data deleted successfully.'
             elif a=='create_user':
                 require(role=='admin','Access denied.'); newrole=f.get('role'); require(newrole in ('student','instructor'),'Invalid role.'); add_user(c,f,newrole)
             elif a=='course':
